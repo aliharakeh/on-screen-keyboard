@@ -38,7 +38,11 @@ public partial class MainWindow : Window
         _repeat.Tick += (_, _) =>
         {
             _repeat.Interval = TimeSpan.FromMilliseconds(40);
-            if (_repeating != null) Tap(_repeating);
+            if (_repeating != null)
+            {
+                Tap(_repeating);
+                TrackWord(_repeating);
+            }
         };
         _poll.Tick += (_, _) => { DetectLanguage(); Refresh(); };
         _poll.Start();
@@ -120,6 +124,7 @@ public partial class MainWindow : Window
         else
         {
             Tap(def);
+            TrackWord(def);
             if (def.Repeat)
             {
                 _repeating = def;
@@ -129,6 +134,45 @@ public partial class MainWindow : Window
             if (!def.IsModifier) ReleaseHeld();
         }
         Refresh();
+    }
+
+    // ---- Typed-word preview -----------------------------------------------------
+
+    private string _word = "";
+
+    private bool IsUpper(KeyDef def)
+    {
+        bool shift = _held.Any(k => k.Kind == KeyKind.Shift);
+        bool caps = (GetKeyState(VK_CAPITAL) & 1) != 0;
+        return shift ^ (caps && def.Letter && _lang == Lang.English);
+    }
+
+    /// <summary>Tracks the word being typed from on-screen key presses and shows it in the title bar.</summary>
+    private void TrackWord(KeyDef def)
+    {
+        if (def.Vk != 0 || _held.Any(k => k.Kind is KeyKind.Ctrl or KeyKind.Alt or KeyKind.Win))
+        {
+            _word = ""; // Navigation/shortcuts move the caret somewhere we can't see.
+        }
+        else if (def.Kind == KeyKind.Caps)
+        {
+            return;
+        }
+        else if (def.Label(Lang.English, false) == "⌫")
+        {
+            if (_word.Length > 0) _word = _word[..^1];
+        }
+        else if (def.Letter || def.Label(Lang.English, false).Length == 1)
+        {
+            _word += def.Label(_lang, IsUpper(def));
+        }
+        else
+        {
+            _word = ""; // Space, Enter, Tab, Esc, F-keys end the word.
+        }
+        if (_word.Length > 40) _word = _word[^40..];
+        WordText.Text = _word.Length > 0 ? _word : "On-Screen Keyboard";
+        WordText.Foreground = _word.Length > 0 ? Brushes.White : Frozen("#FFAAAAAA");
     }
 
     private void Key_Up(object sender, EventArgs e)
@@ -290,7 +334,15 @@ public partial class MainWindow : Window
     private void AnimateIn()
     {
         var duration = TimeSpan.FromMilliseconds(220);
-        BeginAnimation(OpacityProperty, new DoubleAnimation(0, Opacity, duration) { EasingFunction = EaseOut });
+        var fade = new DoubleAnimation(0, Opacity, duration) { EasingFunction = EaseOut };
+        // Release the held animations, otherwise they pin Top/Opacity and a dragged window snaps back
+        // to its old position on minimize/close (and the opacity slider stops working).
+        fade.Completed += (_, _) =>
+        {
+            BeginAnimation(OpacityProperty, null);
+            BeginAnimation(TopProperty, null);
+        };
+        BeginAnimation(OpacityProperty, fade);
         BeginAnimation(TopProperty, new DoubleAnimation(Top + SlideDistance, Top, duration) { EasingFunction = EaseOut });
     }
 

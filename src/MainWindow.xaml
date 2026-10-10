@@ -31,7 +31,8 @@
                 <Button x:Name="LangButton" DockPanel.Dock="Left" Style="{StaticResource KeyStyle}" FontSize="14"
                         Width="44" Height="24" Margin="0,0,10,0" ToolTip="Switch input language (Win+Space)"
                         Click="Lang_Click"/>
-                <TextBlock Text="On-Screen Keyboard" Foreground="#FFAAAAAA" VerticalAlignment="Center"/>
+                <TextBlock x:Name="WordText" Text="On-Screen Keyboard" Foreground="#FFAAAAAA" FontSize="16"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
             </DockPanel>
         </Border>
 
