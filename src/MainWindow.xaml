@@ -9,6 +9,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -20,6 +21,11 @@
                         Width="30" Height="24" Margin="6,0,0,0" ToolTip="Minimize" Click="Minimize_Click"/>
                 <Slider x:Name="OpacitySlider" DockPanel.Dock="Right" Width="90" Minimum="0.3" Maximum="1"
                         VerticalAlignment="Center" ToolTip="Opacity" ValueChanged="Opacity_ValueChanged"/>
+                <Button DockPanel.Dock="Right" Content="🔑 Vault" Style="{StaticResource KeyStyle}" FontSize="13"
+                        MinWidth="70" Height="26" Padding="12,0" Margin="6,0,0,0" ToolTip="Open the vault" Click="Vault_Click"/>
+                <Button DockPanel.Dock="Right" Content="★ Save" Style="{StaticResource KeyStyle}" FontSize="13"
+                        MinWidth="64" Height="26" Padding="12,0" Margin="6,0,0,0" ToolTip="Save the current word to the vault"
+                        Click="SaveWord_Click"/>
                 <ToggleButton x:Name="PinToggle" DockPanel.Dock="Right" Content="Pin" Style="{StaticResource BarToggle}"
                               ToolTip="Always on top" Click="Options_Click"/>
                 <ToggleButton x:Name="NavToggle" DockPanel.Dock="Right" Content="Nav" Style="{StaticResource BarToggle}"
@@ -36,6 +42,10 @@
             </DockPanel>
         </Border>
 
-        <Grid x:Name="KeyRows" Grid.Row="1" Margin="6" SizeChanged="KeyRows_SizeChanged"/>
+        <Border x:Name="SuggestionBar" Grid.Row="1" Background="#FF252525" Padding="8,4" Visibility="Collapsed">
+            <StackPanel x:Name="Suggestions" Orientation="Horizontal"/>
+        </Border>
+
+        <Grid x:Name="KeyRows" Grid.Row="2" Margin="6" SizeChanged="KeyRows_SizeChanged"/>
     </Grid>
 </Window>

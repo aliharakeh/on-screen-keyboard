@@ -13,6 +13,8 @@ internal static class NativeMethods
     public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const uint KEYEVENTF_SCANCODE = 0x0008;
+    public const uint KEYEVENTF_UNICODE = 0x0004;
+    public const ushort VK_BACK = 0x08;
 
     public const ushort VK_LWIN = 0x5B;
     public const ushort VK_SPACE = 0x20;
@@ -66,6 +68,18 @@ internal static class NativeMethods
             u = { ki = { wVk = vk, wScan = scan, dwFlags = flags } }
         };
         SendInput(1, [input], Marshal.SizeOf<INPUT>());
+    }
+
+    /// <summary>Types arbitrary text (any language) into the focused window as Unicode keystrokes.</summary>
+    public static void TypeText(string text)
+    {
+        var inputs = new List<INPUT>();
+        foreach (char c in text)
+        {
+            foreach (uint flags in new[] { KEYEVENTF_UNICODE, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP })
+                inputs.Add(new INPUT { type = INPUT_KEYBOARD, u = { ki = { wScan = c, dwFlags = flags } } });
+        }
+        if (inputs.Count > 0) SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf<INPUT>());
     }
 
     /// <summary>Primary language id (low 10 bits of the LANGID) of the focused window's keyboard layout.</summary>

@@ -19,6 +19,8 @@ public partial class MainWindow : Window
     private static readonly Brush ActiveBrush = Frozen("#FF2D7DD2");
 
     private readonly Settings _settings = Settings.Load();
+    private readonly Vault _vault = Vault.Load();
+    private VaultWindow? _vaultWindow;
     private readonly List<(KeyDef Def, Button Button)> _keys = [];
     private readonly HashSet<KeyDef> _held = [];
     private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromMilliseconds(250) };
@@ -173,6 +175,64 @@ public partial class MainWindow : Window
         if (_word.Length > 40) _word = _word[^40..];
         WordText.Text = _word.Length > 0 ? _word : "On-Screen Keyboard";
         WordText.Foreground = _word.Length > 0 ? Brushes.White : Frozen("#FFAAAAAA");
+        ShowSuggestions();
+    }
+
+    // ---- Vault ------------------------------------------------------------------
+
+    private void ShowSuggestions()
+    {
+        Suggestions.Children.Clear();
+        foreach (var item in _vault.Match(_word))
+        {
+            var button = new Button
+            {
+                Style = (Style)FindResource("KeyStyle"),
+                Content = item.Secret ? $"🔒 {item.Name}" : item.Name == item.Value ? item.Value : $"{item.Name} → {item.Value}",
+                FontSize = 14,
+                Padding = new Thickness(12, 3, 12, 3),
+                Background = ActiveBrush,
+                Tag = item,
+            };
+            button.Click += Suggestion_Click;
+            Suggestions.Children.Add(button);
+        }
+        SuggestionBar.Visibility = Suggestions.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Replaces the word typed so far with the chosen vault value.</summary>
+    private void Suggestion_Click(object sender, RoutedEventArgs e)
+    {
+        var item = (VaultItem)((Button)sender).Tag;
+        for (int i = 0; i < _word.Length; i++)
+        {
+            SendKey(VK_BACK, 0, 0);
+            SendKey(VK_BACK, 0, KEYEVENTF_KEYUP);
+        }
+        TypeText(item.Value);
+        _word = "";
+        WordText.Text = "On-Screen Keyboard";
+        WordText.Foreground = Frozen("#FFAAAAAA");
+        ShowSuggestions();
+    }
+
+    private void Vault_Click(object sender, RoutedEventArgs e) => OpenVault(null);
+
+    private void SaveWord_Click(object sender, RoutedEventArgs e) => OpenVault(_word.Length > 0 ? _word : null);
+
+    private void OpenVault(string? prefill)
+    {
+        if (_vaultWindow == null)
+        {
+            _vaultWindow = new VaultWindow(_vault, prefill) { Owner = this };
+            _vaultWindow.Closed += (_, _) => _vaultWindow = null;
+            _vaultWindow.Show();
+        }
+        else
+        {
+            if (prefill != null) _vaultWindow.StartNew(prefill);
+            _vaultWindow.Activate();
+        }
     }
 
     private void Key_Up(object sender, EventArgs e)
@@ -375,6 +435,7 @@ public partial class MainWindow : Window
         _poll.Stop();
         _repeat.Stop();
         ReleaseHeld();
+        _vaultWindow?.Close();
 
         _settings.ShowNumberRow = NumToggle.IsChecked == true;
         _settings.ShowFunctionRow = FnToggle.IsChecked == true;
