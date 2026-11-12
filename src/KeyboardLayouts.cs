@@ -113,7 +113,7 @@ public static class KeyboardLayouts
 
     public static List<KeyDef> NavRow() =>
     [
-        Vk("Ins", 0x2D, 2.5, false), Vk("Del", 0x2E, 2.5), Vk("Home", 0x24, 2.5),
-        Vk("End", 0x23, 2.5), Vk("PgUp", 0x21, 2.5), Vk("PgDn", 0x22, 2.5),
+        Vk("Insert", 0x2D, 1, false), Vk("Home", 0x24, 1),
+        Vk("End", 0x23, 1), Vk("PgUp", 0x21, 1), Vk("PgDn", 0x22, 1), Vk("PrtSc", 0x2C, 1, false),
     ];
 }

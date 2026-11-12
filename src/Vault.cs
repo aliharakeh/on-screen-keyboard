@@ -11,6 +11,10 @@ public class VaultItem
     public string Value { get; set; } = "";
     /// <summary>Secret values (passwords) are masked in the UI and only matched by name.</summary>
     public bool Secret { get; set; }
+    public bool Favorite { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string FavoriteLabel => Favorite ? "★" : "☆";
 
     [System.Text.Json.Serialization.JsonIgnore]
     public string Display => Secret ? "•••••••• (secret)" : Value;
@@ -41,7 +45,7 @@ public class Vault
         return vault;
     }
 
-    public void Save()
+    public bool Save()
     {
         try
         {
@@ -49,20 +53,41 @@ public class Vault
             var json = JsonSerializer.SerializeToUtf8Bytes(Items);
             File.WriteAllBytes(FilePath, ProtectedData.Protect(json, null, DataProtectionScope.CurrentUser));
         }
-        catch { /* non-fatal */ }
+        catch { return false; }
         Changed?.Invoke();
+        return true;
     }
 
-    public void Add(VaultItem item)
+    public bool Add(VaultItem item)
     {
         Items.Add(item);
-        Save();
+        if (Save()) return true;
+        Items.Remove(item);
+        return false;
     }
 
-    public void Remove(VaultItem item)
+    public bool Remove(VaultItem item)
     {
-        Items.Remove(item);
-        Save();
+        int index = Items.IndexOf(item);
+        if (index < 0) return false;
+        Items.RemoveAt(index);
+        if (Save()) return true;
+        Items.Insert(index, item);
+        return false;
+    }
+
+    public List<VaultItem> Search(string query) => Items
+        .Where(i => i.Name.Contains(query.Trim(), StringComparison.CurrentCultureIgnoreCase)
+            || (!i.Secret && i.Value.Contains(query.Trim(), StringComparison.CurrentCultureIgnoreCase)))
+        .OrderByDescending(i => i.Favorite)
+        .ThenBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+    public bool ToggleFavorite(VaultItem item)
+    {
+        item.Favorite = !item.Favorite;
+        if (Save()) return true;
+        item.Favorite = !item.Favorite;
+        return false;
     }
 
     /// <summary>Items whose name (or non-secret value) starts with what has been typed so far.</summary>

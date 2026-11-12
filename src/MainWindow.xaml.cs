@@ -21,6 +21,8 @@ public partial class MainWindow : Window
     private readonly Settings _settings = Settings.Load();
     private readonly Vault _vault = Vault.Load();
     private VaultWindow? _vaultWindow;
+    private VaultPickerWindow? _vaultPicker;
+    private nint _lastTarget;
     private readonly List<(KeyDef Def, Button Button)> _keys = [];
     private readonly HashSet<KeyDef> _held = [];
     private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromMilliseconds(250) };
@@ -46,11 +48,14 @@ public partial class MainWindow : Window
                 TrackWord(_repeating);
             }
         };
-        _poll.Tick += (_, _) => { DetectLanguage(); Refresh(); };
+        _poll.Tick += (_, _) => { RememberTarget(); DetectLanguage(); Refresh(); };
         _poll.Start();
+        _vault.Changed += ShowSuggestions;
         DetectLanguage();
         Refresh();
         Loaded += (_, _) => AnimateIn();
+        LocationChanged += (_, _) => RepositionSuggestions();
+        SizeChanged += (_, _) => RepositionSuggestions();
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -89,11 +94,25 @@ public partial class MainWindow : Window
         AddRow(KeyboardLayouts.HomeRow());
         AddRow(KeyboardLayouts.BottomLetterRow());
         AddRow(KeyboardLayouts.SpaceRow());
-        _navRow = AddRow(KeyboardLayouts.NavRow());
+        AddSideRow([new KeyDef { En = "Esc", EnShift = "Esc", Ar = "Esc", ArShift = "Esc", Scan = 1 },
+            new KeyDef { En = "Delete", EnShift = "Delete", Ar = "Delete", ArShift = "Delete", Vk = 0x2E, Extended = true, Repeat = true }]);
+        _navRow = new Grid();
+        AddSideRow(KeyboardLayouts.NavRow(), (Grid)_navRow);
     }
 
-    private Panel AddRow(List<KeyDef> defs)
+    private void AddSideRow(List<KeyDef> defs, Grid? grid = null)
     {
+        grid ??= new Grid();
+        for (int i = 0; i < defs.Count; i += 2)
+            AddRow(defs.Skip(i).Take(2).ToList(), grid);
+        NavigationKeys.RowDefinitions.Add(new RowDefinition { Height = new GridLength(defs.Count / 2, GridUnitType.Star) });
+        Grid.SetRow(grid, NavigationKeys.RowDefinitions.Count - 1);
+        NavigationKeys.Children.Add(grid);
+    }
+
+    private Panel AddRow(List<KeyDef> defs, Grid? host = null)
+    {
+        host ??= KeyRows;
         var grid = new Grid();
         for (int i = 0; i < defs.Count; i++)
         {
@@ -107,10 +126,10 @@ public partial class MainWindow : Window
             _keys.Add((defs[i], button));
         }
         var rowDef = new RowDefinition { Height = new GridLength(1, GridUnitType.Star) };
-        KeyRows.RowDefinitions.Add(rowDef);
-        Grid.SetRow(grid, KeyRows.RowDefinitions.Count - 1);
-        KeyRows.Children.Add(grid);
-        _rowDefs[grid] = rowDef;
+        host.RowDefinitions.Add(rowDef);
+        Grid.SetRow(grid, host.RowDefinitions.Count - 1);
+        host.Children.Add(grid);
+        if (host == KeyRows) _rowDefs[grid] = rowDef;
         return grid;
     }
 
@@ -197,7 +216,15 @@ public partial class MainWindow : Window
             button.Click += Suggestion_Click;
             Suggestions.Children.Add(button);
         }
-        SuggestionBar.Visibility = Suggestions.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        SuggestionPopup.IsOpen = Suggestions.Children.Count > 0 && IsVisible && WindowState == WindowState.Normal;
+    }
+
+    private void RepositionSuggestions()
+    {
+        if (!SuggestionPopup.IsOpen) return;
+        // WPF popups do not automatically follow their window when it moves.
+        SuggestionPopup.HorizontalOffset += 1;
+        SuggestionPopup.HorizontalOffset -= 1;
     }
 
     /// <summary>Replaces the word typed so far with the chosen vault value.</summary>
@@ -216,21 +243,70 @@ public partial class MainWindow : Window
         ShowSuggestions();
     }
 
-    private void Vault_Click(object sender, RoutedEventArgs e) => OpenVault(null);
+    private void RememberTarget()
+    {
+        var target = GetForegroundWindow();
+        GetWindowThreadProcessId(target, out var process);
+        if (target != 0 && process != Environment.ProcessId) _lastTarget = target;
+    }
+
+    private void Vault_Click(object sender, RoutedEventArgs e)
+    {
+        OptionsButton.IsChecked = false;
+        SuggestionPopup.IsOpen = false;
+        ReleaseHeld();
+        RememberTarget();
+        if (_vaultWindow != null)
+        {
+            _vaultWindow.Activate();
+            return;
+        }
+        if (_vaultPicker != null)
+        {
+            _vaultPicker.Activate();
+            return;
+        }
+        _vaultPicker = new VaultPickerWindow(_vault, _lastTarget) { Owner = this };
+        _vaultPicker.Closed += (_, _) => _vaultPicker = null;
+        _vaultPicker.EditRequested += item => OpenVault(null, item);
+        _vaultPicker.BeforeInsert += ReleaseHeld;
+        _vaultPicker.Inserted += () =>
+        {
+            _word = "";
+            WordText.Text = "On-Screen Keyboard";
+            WordText.Foreground = Frozen("#FFAAAAAA");
+            ShowSuggestions();
+        };
+        _vaultPicker.Show();
+    }
 
     private void SaveWord_Click(object sender, RoutedEventArgs e) => OpenVault(_word.Length > 0 ? _word : null);
 
-    private void OpenVault(string? prefill)
+    private void OpenVault(string? prefill, VaultItem? item = null)
     {
+        OptionsButton.IsChecked = false;
+        SuggestionPopup.IsOpen = false;
         if (_vaultWindow == null)
         {
-            _vaultWindow = new VaultWindow(_vault, prefill) { Owner = this };
-            _vaultWindow.Closed += (_, _) => _vaultWindow = null;
+            var picker = _vaultPicker;
+            _vaultWindow = new VaultWindow(_vault, prefill) { Owner = (Window?)picker ?? this };
+            if (item != null) _vaultWindow.EditItem(item);
+            if (picker != null) picker.IsEnabled = false;
+            _vaultWindow.Closed += (_, _) =>
+            {
+                _vaultWindow = null;
+                if (picker != null && picker.IsLoaded)
+                {
+                    picker.IsEnabled = true;
+                    picker.Activate();
+                }
+            };
             _vaultWindow.Show();
         }
         else
         {
             if (prefill != null) _vaultWindow.StartNew(prefill);
+            else if (item != null) _vaultWindow.EditItem(item);
             _vaultWindow.Activate();
         }
     }
@@ -292,6 +368,7 @@ public partial class MainWindow : Window
         bool shift = _held.Any(k => k.Kind == KeyKind.Shift);
         bool caps = (GetKeyState(VK_CAPITAL) & 1) != 0;
         LangButton.Content = _lang == Lang.Arabic ? "ع" : "EN";
+        SaveWordButton.IsEnabled = _word.Length > 0;
 
         foreach (var (def, button) in _keys)
         {
@@ -308,6 +385,7 @@ public partial class MainWindow : Window
 
     private void Lang_Click(object sender, RoutedEventArgs e)
     {
+        OptionsButton.IsChecked = false;
         // Win+Space cycles the installed input languages.
         SendKey(VK_LWIN, 0, 0);
         SendKey(VK_SPACE, 0, 0);
@@ -341,7 +419,7 @@ public partial class MainWindow : Window
 
         NumToggle.IsChecked = _settings.ShowNumberRow;
         FnToggle.IsChecked = _settings.ShowFunctionRow;
-        NavToggle.IsChecked = _settings.ShowNavRow;
+        NavToggle.IsChecked = _settings.ShowNavigationPanel;
         PinToggle.IsChecked = _settings.AlwaysOnTop;
         OpacitySlider.Value = Math.Clamp(_settings.Opacity, 0.3, 1);
         ApplyOptions();
@@ -354,6 +432,7 @@ public partial class MainWindow : Window
         _navRow.Visibility = NavToggle.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         foreach (var (panel, def) in _rowDefs)
             def.Height = panel.Visibility == Visibility.Visible ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        NavigationKeys.RowDefinitions[1].Height = _navRow.Visibility == Visibility.Visible ? new GridLength(3, GridUnitType.Star) : new GridLength(0);
         Topmost = PinToggle.IsChecked == true;
         UpdateFontSize();
     }
@@ -428,18 +507,21 @@ public partial class MainWindow : Window
     {
         base.OnStateChanged(e);
         if (WindowState == WindowState.Normal) AnimateIn();
+        else SuggestionPopup.IsOpen = false;
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        SuggestionPopup.IsOpen = false;
         _poll.Stop();
         _repeat.Stop();
         ReleaseHeld();
+        _vaultPicker?.Close();
         _vaultWindow?.Close();
 
         _settings.ShowNumberRow = NumToggle.IsChecked == true;
         _settings.ShowFunctionRow = FnToggle.IsChecked == true;
-        _settings.ShowNavRow = NavToggle.IsChecked == true;
+        _settings.ShowNavigationPanel = NavToggle.IsChecked == true;
         _settings.AlwaysOnTop = PinToggle.IsChecked == true;
         _settings.Opacity = OpacitySlider.Value;
         _settings.Left = Left;

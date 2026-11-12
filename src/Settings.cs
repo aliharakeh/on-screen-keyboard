@@ -7,7 +7,7 @@ public class Settings
 {
     public bool ShowNumberRow { get; set; } = true;
     public bool ShowFunctionRow { get; set; }
-    public bool ShowNavRow { get; set; }
+    public bool ShowNavigationPanel { get; set; } = true;
     public bool AlwaysOnTop { get; set; } = true;
     public double Opacity { get; set; } = 1.0;
     public double? Left { get; set; }

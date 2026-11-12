@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 
 namespace OnScreenKeyboard;
 
@@ -7,83 +9,117 @@ public partial class VaultWindow : Window
 {
     private readonly Vault _vault;
     private VaultItem? _editing;
+    private (string Name, string Value, bool Secret) _original = ("", "", false);
+    private string CurrentValue => SecretValueBox.Visibility == Visibility.Visible ? SecretValueBox.Password : ValueBox.Text;
+    private (string, string, bool) Current => (NameBox.Text, CurrentValue, SecretBox.IsChecked == true);
 
     public VaultWindow(Vault vault, string? prefill = null)
     {
-        InitializeComponent();
         _vault = vault;
-        RefreshList();
+        InitializeComponent();
         StartNew(prefill);
+        Loaded += (_, _) => NameBox.Focus();
     }
 
-    /// <summary>Pre-fills the form with a new word (used by the keyboard's "save current word" button).</summary>
+    private bool CanDiscard() => Current == _original || MessageBox.Show(this,
+        "Discard your unsaved changes?", "Unsaved item", MessageBoxButton.YesNo,
+        MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
+
     public void StartNew(string? prefill = null)
     {
+        if (!CanDiscard()) return;
         _editing = null;
-        ItemList.SelectedItem = null;
-        FormTitle.Text = "New item";
-        NameBox.Text = prefill ?? "";
-        ValueBox.Text = prefill ?? "";
-        SecretBox.IsChecked = false;
-        DeleteButton.IsEnabled = false;
-        Status.Text = "";
+        LoadForm(prefill ?? "", prefill ?? "", false);
         NameBox.Focus();
         NameBox.SelectAll();
     }
 
-    private void RefreshList()
+    private void LoadForm(string name, string value, bool secret)
     {
-        ItemList.ItemsSource = null;
-        ItemList.ItemsSource = _vault.Items;
-    }
-
-    private void ItemList_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (ItemList.SelectedItem is not VaultItem item) return;
-        _editing = item;
-        FormTitle.Text = "Edit item";
-        NameBox.Text = item.Name;
-        ValueBox.Text = item.Value;
-        SecretBox.IsChecked = item.Secret;
-        DeleteButton.IsEnabled = true;
+        Title = _editing == null ? "New vault item" : "Edit vault item";
+        FormTitle.Text = _editing == null ? "New item" : "Edit item";
+        NameBox.Text = name;
+        ValueBox.Text = value;
+        SecretValueBox.Password = value;
+        SecretBox.IsChecked = secret;
+        RevealBox.IsChecked = false;
+        UpdateSecretDisplay();
         Status.Text = "";
+        _original = Current;
     }
 
-    private void New_Click(object sender, RoutedEventArgs e) => StartNew();
+    private void UpdateSecretDisplay()
+    {
+        bool secret = SecretBox.IsChecked == true;
+        bool masked = secret && RevealBox.IsChecked != true;
+        RevealBox.Visibility = secret ? Visibility.Visible : Visibility.Collapsed;
+        SecretValueBox.Visibility = masked ? Visibility.Visible : Visibility.Collapsed;
+        ValueBox.Visibility = masked ? Visibility.Collapsed : Visibility.Visible;
+        // Keep plaintext out of the hidden editor while a secret is masked.
+        if (masked) ValueBox.Clear();
+        else SecretValueBox.Clear();
+    }
+
+    private void SecretDisplay_Changed(object sender, RoutedEventArgs e)
+    {
+        var value = CurrentValue;
+        ValueBox.Text = value;
+        SecretValueBox.Password = value;
+        if (SecretBox.IsChecked != true) RevealBox.IsChecked = false;
+        UpdateSecretDisplay();
+    }
+
+    public void EditItem(VaultItem item)
+    {
+        if (!CanDiscard()) return;
+        _editing = item;
+        LoadForm(item.Name, item.Value, item.Secret);
+    }
+
+    private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         var name = NameBox.Text.Trim();
-        if (name.Length == 0 || ValueBox.Text.Length == 0)
+        var value = CurrentValue;
+        if (name.Length == 0 || value.Length == 0)
         {
-            Status.Foreground = System.Windows.Media.Brushes.Orange;
-            Status.Text = "Name and value are required.";
+            Status.Foreground = Brushes.Orange;
+            Status.Text = "Enter a shortcut and the text to insert.";
             return;
         }
+        bool saved;
         if (_editing != null)
         {
+            if (!_vault.Items.Contains(_editing))
+            {
+                Status.Text = "This item was deleted. Close this form and add a new item.";
+                return;
+            }
+            var previous = (_editing.Name, _editing.Value, _editing.Secret);
             _editing.Name = name;
-            _editing.Value = ValueBox.Text;
+            _editing.Value = value;
             _editing.Secret = SecretBox.IsChecked == true;
-            _vault.Save();
+            saved = _vault.Save();
+            if (!saved) (_editing.Name, _editing.Value, _editing.Secret) = previous;
         }
         else
         {
-            _editing = new VaultItem { Name = name, Value = ValueBox.Text, Secret = SecretBox.IsChecked == true };
-            _vault.Add(_editing);
+            saved = _vault.Add(new VaultItem { Name = name, Value = value, Secret = SecretBox.IsChecked == true });
         }
-        var saved = _editing;
-        RefreshList();
-        ItemList.SelectedItem = saved;
-        Status.Foreground = System.Windows.Media.Brushes.LightGreen;
-        Status.Text = "Saved.";
+        if (!saved)
+        {
+            Status.Foreground = Brushes.Orange;
+            Status.Text = "Could not save this item. Your changes are still here; please try again.";
+            return;
+        }
+        _original = Current;
+        Close();
     }
 
-    private void Delete_Click(object sender, RoutedEventArgs e)
+    protected override void OnClosing(CancelEventArgs e)
     {
-        if (_editing == null) return;
-        _vault.Remove(_editing);
-        RefreshList();
-        StartNew();
+        if (!CanDiscard()) e.Cancel = true;
+        base.OnClosing(e);
     }
 }

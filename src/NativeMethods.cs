@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace OnScreenKeyboard;
 
@@ -60,6 +61,20 @@ internal static class NativeMethods
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern nint GetWindowLongPtr(nint hWnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern nint SetWindowLongPtr(nint hWnd, int index, nint value);
 
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(nint hwnd);
+    [DllImport("user32.dll")] public static extern bool IsWindow(nint hwnd);
+    [DllImport("user32.dll")] public static extern bool IsIconic(nint hwnd);
+    [DllImport("user32.dll")] public static extern bool ShowWindowAsync(nint hwnd, int command);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(nint hwnd, StringBuilder text, int count);
+
+    public static string WindowTitle(nint hwnd)
+    {
+        var text = new StringBuilder(256);
+        GetWindowText(hwnd, text, text.Capacity);
+        return text.ToString();
+    }
+
     public static void SendKey(ushort vk, ushort scan, uint flags)
     {
         var input = new INPUT
@@ -71,7 +86,7 @@ internal static class NativeMethods
     }
 
     /// <summary>Types arbitrary text (any language) into the focused window as Unicode keystrokes.</summary>
-    public static void TypeText(string text)
+    public static bool TypeText(string text)
     {
         var inputs = new List<INPUT>();
         foreach (char c in text)
@@ -79,7 +94,7 @@ internal static class NativeMethods
             foreach (uint flags in new[] { KEYEVENTF_UNICODE, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP })
                 inputs.Add(new INPUT { type = INPUT_KEYBOARD, u = { ki = { wScan = c, dwFlags = flags } } });
         }
-        if (inputs.Count > 0) SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf<INPUT>());
+        return inputs.Count == 0 || SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf<INPUT>()) == inputs.Count;
     }
 
     /// <summary>Primary language id (low 10 bits of the LANGID) of the focused window's keyboard layout.</summary>

@@ -1,4 +1,4 @@
-<Window x:Class="OnScreenKeyboard.MainWindow"
+<Window x:Class="OnScreenKeyboard.MainWindow" x:Name="KeyboardWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="On-Screen Keyboard" Icon="app.ico"
@@ -9,7 +9,6 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -19,33 +18,55 @@
                         Width="30" Height="24" Margin="6,0,0,0" Click="Close_Click"/>
                 <Button DockPanel.Dock="Right" Content="—" Style="{StaticResource KeyStyle}" FontSize="14"
                         Width="30" Height="24" Margin="6,0,0,0" ToolTip="Minimize" Click="Minimize_Click"/>
-                <Slider x:Name="OpacitySlider" DockPanel.Dock="Right" Width="90" Minimum="0.3" Maximum="1"
-                        VerticalAlignment="Center" ToolTip="Opacity" ValueChanged="Opacity_ValueChanged"/>
-                <Button DockPanel.Dock="Right" Content="🔑 Vault" Style="{StaticResource KeyStyle}" FontSize="13"
-                        MinWidth="70" Height="26" Padding="12,0" Margin="6,0,0,0" ToolTip="Open the vault" Click="Vault_Click"/>
-                <Button DockPanel.Dock="Right" Content="★ Save" Style="{StaticResource KeyStyle}" FontSize="13"
-                        MinWidth="64" Height="26" Padding="12,0" Margin="6,0,0,0" ToolTip="Save the current word to the vault"
-                        Click="SaveWord_Click"/>
-                <ToggleButton x:Name="PinToggle" DockPanel.Dock="Right" Content="Pin" Style="{StaticResource BarToggle}"
-                              ToolTip="Always on top" Click="Options_Click"/>
-                <ToggleButton x:Name="NavToggle" DockPanel.Dock="Right" Content="Nav" Style="{StaticResource BarToggle}"
-                              ToolTip="Navigation row" Click="Options_Click"/>
-                <ToggleButton x:Name="FnToggle" DockPanel.Dock="Right" Content="Fn" Style="{StaticResource BarToggle}"
-                              ToolTip="Function row" Click="Options_Click"/>
-                <ToggleButton x:Name="NumToggle" DockPanel.Dock="Right" Content="123" Style="{StaticResource BarToggle}"
-                              ToolTip="Number row" Click="Options_Click"/>
+                <ToggleButton x:Name="OptionsButton" DockPanel.Dock="Right" Content="⚙ Options"
+                              Style="{StaticResource BarToggle}" ToolTip="Keyboard options"/>
+                <Button x:Name="VaultButton" DockPanel.Dock="Right" Content="Vault" Style="{StaticResource KeyStyle}" FontSize="14"
+                        Height="26" Padding="10,0" Margin="6,0,0,0" ToolTip="Open the vault"
+                        AutomationProperties.Name="Open vault" Click="Vault_Click"/>
+                <Button x:Name="SaveWordButton" DockPanel.Dock="Right" Content="★" Style="{StaticResource KeyStyle}" FontSize="18"
+                        Width="32" Height="26" Margin="6,0" ToolTip="Save current word to the vault"
+                        AutomationProperties.Name="Save current word" Click="SaveWord_Click"/>
                 <Button x:Name="LangButton" DockPanel.Dock="Left" Style="{StaticResource KeyStyle}" FontSize="14"
-                        Width="44" Height="24" Margin="0,0,10,0" ToolTip="Switch input language (Win+Space)"
-                        Click="Lang_Click"/>
+                        Width="44" Height="26" Margin="0,0,10,0" ToolTip="Switch input language (Win+Space)"
+                        AutomationProperties.Name="Switch input language" Click="Lang_Click"/>
                 <TextBlock x:Name="WordText" Text="On-Screen Keyboard" Foreground="#FFAAAAAA" FontSize="16"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
             </DockPanel>
         </Border>
 
-        <Border x:Name="SuggestionBar" Grid.Row="1" Background="#FF252525" Padding="8,4" Visibility="Collapsed">
-            <StackPanel x:Name="Suggestions" Orientation="Horizontal"/>
-        </Border>
+        <Popup x:Name="SuggestionPopup" PlacementTarget="{Binding ElementName=KeyboardWindow}" Placement="Top"
+               StaysOpen="True" AllowsTransparency="True" Focusable="False">
+            <Border Background="#FF252525" BorderBrush="#FF555555" BorderThickness="1" CornerRadius="6" Padding="6,4"
+                    MaxWidth="{Binding ActualWidth, ElementName=KeyboardWindow}">
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Focusable="False">
+                    <StackPanel x:Name="Suggestions" Orientation="Horizontal"/>
+                </ScrollViewer>
+            </Border>
+        </Popup>
 
-        <Grid x:Name="KeyRows" Grid.Row="2" Margin="6" SizeChanged="KeyRows_SizeChanged"/>
+        <Grid Grid.Row="1" Margin="6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="1.8*" MaxWidth="150"/>
+            </Grid.ColumnDefinitions>
+            <Grid x:Name="KeyRows" SizeChanged="KeyRows_SizeChanged"/>
+            <Grid x:Name="NavigationKeys" Grid.Column="1" Margin="6,0,0,0"/>
+        </Grid>
+
+        <Popup PlacementTarget="{Binding ElementName=OptionsButton}" Placement="Bottom"
+               IsOpen="{Binding IsChecked, ElementName=OptionsButton, Mode=TwoWay}" StaysOpen="False"
+               AllowsTransparency="True">
+            <Border Background="#FF2B2B2B" BorderBrush="#FF555555" BorderThickness="1" CornerRadius="8" Padding="16">
+                <StackPanel Width="260">
+                    <TextBlock Text="Keyboard options" Foreground="White" FontSize="18" Margin="0,0,0,12"/>
+                    <ToggleButton x:Name="NumToggle" Content="Number row" Style="{StaticResource BarToggle}" Margin="0,3" Click="Options_Click"/>
+                    <ToggleButton x:Name="FnToggle" Content="Function row (F1–F12)" Style="{StaticResource BarToggle}" Margin="0,3" Click="Options_Click"/>
+                    <ToggleButton x:Name="NavToggle" Content="Extra navigation keys" Style="{StaticResource BarToggle}" Margin="0,3" Click="Options_Click"/>
+                    <ToggleButton x:Name="PinToggle" Content="Always on top" Style="{StaticResource BarToggle}" Margin="0,3" Click="Options_Click"/>
+                    <TextBlock Text="Opacity" Foreground="#FFCCCCCC" Margin="0,12,0,6"/>
+                    <Slider x:Name="OpacitySlider" Minimum="0.3" Maximum="1" ToolTip="Keyboard opacity" ValueChanged="Opacity_ValueChanged"/>
+                </StackPanel>
+            </Border>
+        </Popup>
     </Grid>
 </Window>
