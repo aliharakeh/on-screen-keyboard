@@ -1,0 +1,32 @@
+<Window x:Class="OnScreenKeyboard.VoiceShortcutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Voice typing shortcut" Icon="app.ico" Width="440" SizeToContent="Height" ResizeMode="NoResize"
+        Background="#FF1E1E1E" Foreground="White" WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <Window.Resources>
+        <Style TargetType="Button" BasedOn="{StaticResource KeyStyle}" x:Key="Action">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Padding" Value="20,9"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+        </Style>
+    </Window.Resources>
+    <StackPanel Margin="20">
+        <TextBlock Text="Voice typing shortcut" FontSize="20" FontWeight="SemiBold"/>
+        <TextBlock Foreground="#FFAAAAAA" TextWrapping="Wrap" Margin="0,8,0,0"
+                   Text="The 🎤 button presses this shortcut in the app you are typing into. Keep Windows voice typing (Win+H), or use the shortcut of another voice typing app. Holding the button holds the keys, for push-to-talk apps."/>
+        <TextBlock Text="Shortcut" Foreground="#FFAAAAAA" Margin="0,14,0,4"/>
+        <TextBox x:Name="ShortcutBox" FontSize="16" Padding="6" IsReadOnly="True" IsReadOnlyCaretVisible="False"
+                 Background="#FF2B2B2B" Foreground="White" BorderBrush="#FF555555"
+                 AutomationProperties.Name="Voice typing shortcut. Press keys to record."
+                 PreviewKeyDown="ShortcutBox_PreviewKeyDown" PreviewKeyUp="ShortcutBox_PreviewKeyUp"/>
+        <TextBlock Foreground="#FFAAAAAA" TextWrapping="Wrap" Margin="0,4,0,0"
+                   Text="Click the box and press the keys. Windows reserves most Win shortcuts, so tick the box below instead of pressing Win."/>
+        <CheckBox x:Name="WinBox" Content="Include the Windows key" Foreground="White" Margin="0,10,0,0" Click="WinBox_Click"/>
+        <WrapPanel Margin="0,18,0,0">
+            <Button Content="Save" Style="{StaticResource Action}" Background="#FF2D7DD2" IsDefault="False" Click="Save_Click"/>
+            <Button Content="Use Windows (Win+H)" Style="{StaticResource Action}" Click="Reset_Click"/>
+            <Button Content="Cancel" Style="{StaticResource Action}" Click="Cancel_Click"/>
+        </WrapPanel>
+        <TextBlock x:Name="Status" Foreground="#FFE0A050" TextWrapping="Wrap" Margin="0,10,0,0"/>
+    </StackPanel>
+</Window>

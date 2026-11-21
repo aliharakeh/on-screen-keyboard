@@ -58,6 +58,7 @@ internal static class NativeMethods
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(nint hWnd, out uint processId);
     [DllImport("user32.dll")] public static extern nint GetKeyboardLayout(uint threadId);
     [DllImport("user32.dll")] public static extern short GetKeyState(int vKey);
+    [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint code, uint mapType);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern nint GetWindowLongPtr(nint hWnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern nint SetWindowLongPtr(nint hWnd, int index, nint value);
 

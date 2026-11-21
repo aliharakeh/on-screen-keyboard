@@ -13,6 +13,8 @@
 
   <ItemGroup>
     <Resource Include="app.ico" />
+    <EmbeddedResource Include="Dictionaries\words.en.txt" LogicalName="words.en.txt" WithCulture="false" />
+    <EmbeddedResource Include="Dictionaries\words.ar.txt" LogicalName="words.ar.txt" WithCulture="false" />
   </ItemGroup>
 
 </Project>

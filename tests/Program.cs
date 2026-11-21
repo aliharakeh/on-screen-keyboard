@@ -189,6 +189,66 @@ class Check {
   Assert(((TextBox)openPicker.FindName("SearchBox")).Text=="preserved search", "List search survives editing");
   openPicker.Close();
   Assert(KeyboardLayouts.NavRow().Any(k=>k.Vk==0x2C && !k.Repeat), "Print Screen definition");
+
+  // Predictions: bundled lists, learning, next word, casing.
+  var predictor=new Predictor();
+  Assert(predictor.Complete("th",null).Contains("the"), "English completion from bundled list");
+  Assert(predictor.Complete("Th",null)[0].StartsWith("Th"), "Completion follows typed casing");
+  Assert(predictor.Complete("i'",null).Contains("I'm"), "Dictionary casing kept for I'm");
+  Assert(predictor.Complete("مر",null).Count>0, "Arabic completion from bundled list");
+  predictor.Learn(null,"thermostat");
+  Assert(predictor.Complete("th",null)[0]=="thermostat", "A used word outranks unused list words");
+  predictor.Learn(null,"zqxw");
+  Assert(!predictor.Complete("zq",null).Contains("zqxw"), "One-off unknown words are not suggested");
+  predictor.Learn(null,"zqxw");
+  Assert(predictor.Complete("zq",null).Contains("zqxw"), "Repeated unknown words are suggested");
+  predictor.Learn("good","morning"); predictor.Learn("good","morning"); predictor.Learn("good","night");
+  Assert(predictor.PredictNext("Good")[0]=="morning", "Next-word prediction by frequency");
+  Assert(predictor.Complete("n","good")[0]=="night", "Previous word boosts completions");
+  predictor.Forget("zqxw"); Assert(predictor.Count("zqxw")==1, "Forget undoes one use");
+  Assert(!predictor.IsKnown("zqxw"), "Not known yet");predictor.MarkKnown("zqxw"); Assert(predictor.IsKnown("zqxw"), "Mark known");
+  var words=new WordsWindow(predictor);
+  var wordList=(ListBox)words.FindName("WordList");
+  Assert(wordList.Items.Cast<WordRow>().Any(r=>r.Word=="thermostat" && r.Removable), "Learned words listed");
+  ((RadioButton)words.FindName("ArabicTab")).IsChecked=true;
+  Assert(wordList.Items.Count==Predictor.BuiltInWords(true).Count, "Arabic list browsable");
+  ((RadioButton)words.FindName("EnglishTab")).IsChecked=true;
+  ((TextBox)words.FindName("SearchBox")).Text="THERMO";
+  Assert(wordList.Items.Cast<WordRow>().All(r=>r.Word.Contains("thermo") && !r.Removable) && wordList.Items.Count>0, "English list search");
+  ((RadioButton)words.FindName("MineTab")).IsChecked=true;
+  typeof(WordsWindow).GetMethod("Remove_Click",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(words,
+   new object[]{new Button { DataContext=wordList.Items.Cast<WordRow>().First() },new RoutedEventArgs()});
+  Assert(predictor.Count("thermostat")==0 && wordList.Items.Count==0, "Remove forgets a learned word");
+  words.Close();
+  var split=typeof(MainWindow).GetMethod("SplitWord",BindingFlags.Static|BindingFlags.NonPublic)!;
+  var parts=((string,string,string))split.Invoke(null,new object[]{"(don't,"})!;
+  Assert(parts==("(","don't",","), "Word split keeps punctuation around the word");
+  Assert((((string,string,string))split.Invoke(null,new object[]{"ab1cd"})!).Item2=="", "Mixed tokens are not words");
+
+  // Voice shortcut parsing round-trips.
+  Assert(Shortcut.Parse("Win+H")!.ToString()=="Win+H", "Default voice shortcut");
+  Assert(Shortcut.Parse("control + shift + space")!.ToString()=="Ctrl+Shift+Space", "Shortcut normalization");
+  Assert(Shortcut.Parse("Ctrl+Win")!.Key==System.Windows.Input.Key.None, "Modifier-only shortcut");
+  Assert(Shortcut.Parse("Alt+1")!.ToString()=="Alt+1" && Shortcut.Parse("F9")!=null, "Digits and function keys");
+  var voiceDialog=new VoiceShortcutWindow(Shortcut.Parse("Ctrl+Win"));
+  Assert(((TextBox)voiceDialog.FindName("ShortcutBox")).Text=="Ctrl+Win" && ((CheckBox)voiceDialog.FindName("WinBox")).IsChecked==true, "Voice dialog shows current shortcut");
+  typeof(VoiceShortcutWindow).GetMethod("Reset_Click",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(voiceDialog,new object[]{new Button(),new RoutedEventArgs()});
+  Assert(((TextBox)voiceDialog.FindName("ShortcutBox")).Text=="Win+H", "Voice dialog resets to Windows voice typing");
+  voiceDialog.Close();
+  Assert(((Button)keyboard.FindName("VoiceShortcutButton")).Content.ToString()!.StartsWith("Shortcut: "), "Voice option label");
+  Assert(Shortcut.Parse("Ctrl+H+J")==null && Shortcut.Parse("")==null && Shortcut.Parse("Ctrl+Bogus")==null, "Invalid shortcuts rejected");
+
+  // Windows spell checker (skipped if no English spelling data is installed).
+  var speller=new SpellChecker();
+  if (speller.Languages.Any(l=>l.StartsWith("en"))) {
+   Assert(speller.Check("hello")==null, "Correct word passes");
+   var spell=speller.Check("helo");
+   Assert(spell!=null && spell.Suggestions.Contains("hello"), "Misspelled word gets suggestions");
+   Assert(speller.Check("teh")?.Replacement=="the", "Swapped letters are auto-correctable");
+   Assert(speller.Check("Teh")?.Replacement==null, "Capitalized words are never auto-corrected");
+   Assert(SpellChecker.TypoDistance("wierd","weird")==1 && SpellChecker.TypoDistance("cat","dog")==3, "Typo distance");
+   Console.WriteLine("Spell checker languages: "+string.Join(", ",speller.Languages)+"; teh -> "+(speller.Check("teh")?.Replacement ?? "<none>"));
+  }
   Console.WriteLine("Passed: WPF construction, search privacy, secret reveal/mask, new-item prefill, navigation visibility, Print Screen mapping, favorites, picker search, insertion guard, form ownership, and list preservation.");
   Environment.Exit(0);
  }

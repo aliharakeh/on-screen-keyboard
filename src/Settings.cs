@@ -10,6 +10,12 @@ public class Settings
     public bool ShowNavigationPanel { get; set; } = true;
     public bool AlwaysOnTop { get; set; } = true;
     public double Opacity { get; set; } = 1.0;
+    public bool WordPredictions { get; set; } = true;
+    public bool LearnWords { get; set; } = true;
+    public bool SpellCheck { get; set; } = true;
+    public bool AutoCorrect { get; set; }
+    /// <summary>Key combination the 🎤 button sends, e.g. "Win+H" (Windows voice typing) or an external app's shortcut.</summary>
+    public string VoiceShortcut { get; set; } = OnScreenKeyboard.Shortcut.WindowsVoiceTyping;
     public double? Left { get; set; }
     public double? Top { get; set; }
     public double? Width { get; set; }

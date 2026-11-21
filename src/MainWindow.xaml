@@ -29,6 +29,9 @@
                 <Button x:Name="LangButton" DockPanel.Dock="Left" Style="{StaticResource KeyStyle}" FontSize="14"
                         Width="44" Height="26" Margin="0,0,10,0" ToolTip="Switch input language (Win+Space)"
                         AutomationProperties.Name="Switch input language" Click="Lang_Click"/>
+                <Button x:Name="VoiceButton" DockPanel.Dock="Left" Content="🎤" Style="{StaticResource KeyStyle}" FontSize="15"
+                        Width="38" Height="26" Margin="0,0,10,0" AutomationProperties.Name="Voice typing"
+                        PreviewMouseLeftButtonDown="Voice_Down" PreviewMouseLeftButtonUp="Voice_Up" LostMouseCapture="Voice_Up"/>
                 <TextBlock x:Name="WordText" Text="On-Screen Keyboard" Foreground="#FFAAAAAA" FontSize="16"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
             </DockPanel>
@@ -65,6 +68,19 @@
                     <ToggleButton x:Name="PinToggle" Content="Always on top" Style="{StaticResource BarToggle}" Margin="0,3" Click="Options_Click"/>
                     <TextBlock Text="Opacity" Foreground="#FFCCCCCC" Margin="0,12,0,6"/>
                     <Slider x:Name="OpacitySlider" Minimum="0.3" Maximum="1" ToolTip="Keyboard opacity" ValueChanged="Opacity_ValueChanged"/>
+                    <TextBlock Text="Typing help" Foreground="#FFCCCCCC" Margin="0,14,0,6"/>
+                    <ToggleButton x:Name="PredictToggle" Content="Word predictions" Style="{StaticResource BarToggle}" Margin="0,3" Click="Options_Click"/>
+                    <ToggleButton x:Name="LearnToggle" Content="Learn from my typing" Style="{StaticResource BarToggle}" Margin="0,3" Click="Options_Click"/>
+                    <ToggleButton x:Name="SpellToggle" Content="Spell check" Style="{StaticResource BarToggle}" Margin="0,3" Click="Options_Click"/>
+                    <ToggleButton x:Name="AutoCorrectToggle" Content="Auto-correct common typos" Style="{StaticResource BarToggle}" Margin="0,3" Click="Options_Click"/>
+                    <Button Content="Browse dictionary words…" Style="{StaticResource KeyStyle}" FontSize="13" Padding="10,5" Margin="3,6,3,3"
+                            ToolTip="See the built-in English and Arabic words and the words learned from your typing"
+                            Click="BrowseWords_Click"/>
+                    <Button Content="Clear learned words" Style="{StaticResource KeyStyle}" FontSize="13" Padding="10,5" Margin="3"
+                            Click="ClearLearned_Click"/>
+                    <TextBlock Text="Voice typing" Foreground="#FFCCCCCC" Margin="0,14,0,6"/>
+                    <Button x:Name="VoiceShortcutButton" Style="{StaticResource KeyStyle}" FontSize="13" Padding="10,5" Margin="3"
+                            ToolTip="Change the shortcut the 🎤 button sends" Click="VoiceShortcut_Click"/>
                 </StackPanel>
             </Border>
         </Popup>

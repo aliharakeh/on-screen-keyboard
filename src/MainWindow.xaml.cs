@@ -51,6 +51,7 @@ public partial class MainWindow : Window
         _poll.Tick += (_, _) => { RememberTarget(); DetectLanguage(); Refresh(); };
         _poll.Start();
         _vault.Changed += ShowSuggestions;
+        _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); _predictor.Save(); };
         DetectLanguage();
         Refresh();
         Loaded += (_, _) => AnimateIn();
@@ -157,9 +158,29 @@ public partial class MainWindow : Window
         Refresh();
     }
 
-    // ---- Typed-word preview -----------------------------------------------------
+    // ---- Typed-word tracking ----------------------------------------------------
+
+    private static readonly Brush CorrectionBrush = Frozen("#FFB8742A");
+    private static readonly Brush PredictionBrush = Frozen("#FF4A4A4A");
+
+    private readonly Predictor _predictor = Predictor.Load();
+    private readonly SpellChecker _speller = new();
+    private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromSeconds(10) };
 
     private string _word = "";
+    /// <summary>Last word completed with Space, used for next-word prediction.</summary>
+    private string? _prevWord;
+    /// <summary>The word just completed with Space; Backspace removes the space and resumes editing it.</summary>
+    private Committed? _resume;
+    /// <summary>Spelling suggestions for the word just completed (shown until the next key press).</summary>
+    private List<string> _corrections = [];
+    /// <summary>Set right after an auto-correction so it can be undone with one tap.</summary>
+    private string? _undoOriginal;
+
+    /// <param name="Raw">Text in the field before the trailing space, e.g. "(hello,".</param>
+    /// <param name="Lead">Characters before the word, e.g. "(".</param>
+    /// <param name="Trail">Characters after the word, e.g. ",".</param>
+    private sealed record Committed(string Raw, string Lead, string Core, string Trail, string? PrevBefore, bool Learned);
 
     private bool IsUpper(KeyDef def)
     {
@@ -171,52 +192,183 @@ public partial class MainWindow : Window
     /// <summary>Tracks the word being typed from on-screen key presses and shows it in the title bar.</summary>
     private void TrackWord(KeyDef def)
     {
+        if (def.Kind == KeyKind.Caps) return;
+        _corrections = [];
+        _undoOriginal = null;
+        var label = def.Label(Lang.English, false);
         if (def.Vk != 0 || _held.Any(k => k.Kind is KeyKind.Ctrl or KeyKind.Alt or KeyKind.Win))
         {
-            _word = ""; // Navigation/shortcuts move the caret somewhere we can't see.
+            // Navigation/shortcuts move the caret somewhere we can't see.
+            _word = "";
+            _prevWord = null;
+            _resume = null;
         }
-        else if (def.Kind == KeyKind.Caps)
-        {
-            return;
-        }
-        else if (def.Label(Lang.English, false) == "⌫")
+        else if (label == "⌫")
         {
             if (_word.Length > 0) _word = _word[..^1];
+            else if (_resume is { } last)
+            {
+                // The space after the last word was deleted: continue editing that word.
+                _word = last.Raw;
+                _prevWord = last.PrevBefore;
+                if (last.Learned) _predictor.Forget(last.Core);
+            }
+            else _prevWord = null;
+            _resume = null;
         }
-        else if (def.Letter || def.Label(Lang.English, false).Length == 1)
+        else if (def.Letter || label.Length == 1)
         {
             _word += def.Label(_lang, IsUpper(def));
+            _resume = null;
         }
         else
         {
-            _word = ""; // Space, Enter, Tab, Esc, F-keys end the word.
+            // Space, Enter, Tab, Esc, F-keys end the word.
+            var ended = _word;
+            _word = "";
+            CommitWord(ended, bySpace: def.Scan == 57);
         }
         if (_word.Length > 40) _word = _word[^40..];
-        WordText.Text = _word.Length > 0 ? _word : "On-Screen Keyboard";
-        WordText.Foreground = _word.Length > 0 ? Brushes.White : Frozen("#FFAAAAAA");
+        UpdateWordText();
         ShowSuggestions();
     }
 
-    // ---- Vault ------------------------------------------------------------------
+    private void UpdateWordText()
+    {
+        WordText.Text = _word.Length > 0 ? _word : "On-Screen Keyboard";
+        WordText.Foreground = _word.Length > 0 ? Brushes.White : Frozen("#FFAAAAAA");
+    }
+
+    /// <summary>Forgets the word context, e.g. after inserting text we did not type key by key.</summary>
+    private void ResetWord()
+    {
+        _word = "";
+        _prevWord = null;
+        _resume = null;
+        _corrections = [];
+        _undoOriginal = null;
+        UpdateWordText();
+        ShowSuggestions();
+    }
+
+    private static bool IsWordChar(char c) =>
+        char.IsLetter(c) || System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.NonSpacingMark;
+
+    /// <summary>Splits "(don't," into "(", "don't", ","; Core is empty unless the rest is only punctuation.</summary>
+    private static (string Lead, string Core, string Trail) SplitWord(string raw)
+    {
+        int end = raw.Length;
+        while (end > 0 && !IsWordChar(raw[end - 1])) end--;
+        int start = end;
+        while (start > 0 && (IsWordChar(raw[start - 1]) || raw[start - 1] == '\'')) start--;
+        while (start < end && raw[start] == '\'') start++;
+        string lead = raw[..start], trail = raw[end..];
+        bool clean = !lead.Any(char.IsLetterOrDigit) && !trail.Any(char.IsLetterOrDigit);
+        return clean ? (lead, raw[start..end], trail) : (raw, "", "");
+    }
+
+    /// <summary>Handles a word that was just ended by a key press (the key itself was already sent).</summary>
+    private void CommitWord(string raw, bool bySpace)
+    {
+        var (lead, core, trail) = SplitWord(raw);
+        var prevBefore = _prevWord;
+        _prevWord = null;
+        _resume = null;
+        if (core.Length == 0) return;
+
+        if (bySpace && SpellToggle.IsChecked == true && core.Length >= 2 && !_predictor.IsKnown(core)
+            && _speller.Check(core) is { } result)
+        {
+            if (AutoCorrectToggle.IsChecked == true && result.Replacement != null)
+            {
+                ReplaceTyped(raw.Length + 1, lead + result.Replacement + trail + " ");
+                _undoOriginal = core;
+                core = result.Replacement;
+            }
+            else _corrections = result.Suggestions.Take(3).ToList();
+        }
+        Accept(lead, core, trail, prevBefore, bySpace);
+    }
+
+    /// <summary>Records a finished word: learning, next-word context and Backspace-to-resume.</summary>
+    private void Accept(string lead, string core, string trail, string? prevBefore, bool bySpace)
+    {
+        bool learned = false;
+        if (LearnToggle.IsChecked == true && !FocusedFieldIsPassword())
+        {
+            _predictor.Learn(prevBefore, core);
+            learned = true;
+            _saveTimer.Stop();
+            _saveTimer.Start();
+        }
+        if (!bySpace) return;
+        _resume = new Committed(lead + core + trail, lead, core, trail, prevBefore, learned);
+        bool endsSentence = trail.IndexOfAny(['.', '!', '?', '؟', ':', ';', '؛']) >= 0;
+        _prevWord = endsSentence ? null : core;
+    }
+
+    /// <summary>Never learn passwords: asks UI Automation whether the focused field is a password box.</summary>
+    private static bool FocusedFieldIsPassword()
+    {
+        try
+        {
+            var task = Task.Run(() => System.Windows.Automation.AutomationElement.FocusedElement?.Current.IsPassword == true);
+            return !task.Wait(250) || task.Result; // unknown counts as a password
+        }
+        catch { return true; }
+    }
+
+    private static void ReplaceTyped(int backspaces, string text)
+    {
+        for (int i = 0; i < backspaces; i++)
+        {
+            SendKey(VK_BACK, 0, 0);
+            SendKey(VK_BACK, 0, KEYEVENTF_KEYUP);
+        }
+        TypeText(text);
+    }
+
+    // ---- Suggestions (vault, spelling, predictions) ------------------------------
 
     private void ShowSuggestions()
     {
         Suggestions.Children.Clear();
+        if (_undoOriginal != null)
+            AddChip($"↶ {_undoOriginal}", CorrectionBrush, "Undo auto-correct", Undo_Click);
+        foreach (var correction in _corrections)
+            AddChip(correction, CorrectionBrush, $"Replace “{_resume?.Core}” with “{correction}”", Correction_Click);
         foreach (var item in _vault.Match(_word))
         {
-            var button = new Button
-            {
-                Style = (Style)FindResource("KeyStyle"),
-                Content = item.Secret ? $"🔒 {item.Name}" : item.Name == item.Value ? item.Value : $"{item.Name} → {item.Value}",
-                FontSize = 14,
-                Padding = new Thickness(12, 3, 12, 3),
-                Background = ActiveBrush,
-                Tag = item,
-            };
-            button.Click += Suggestion_Click;
-            Suggestions.Children.Add(button);
+            var content = item.Secret ? $"🔒 {item.Name}" : item.Name == item.Value ? item.Value : $"{item.Name} → {item.Value}";
+            AddChip(content, ActiveBrush, null, Suggestion_Click).Tag = item;
+        }
+        if (PredictToggle.IsChecked == true)
+        {
+            var (_, core, trail) = SplitWord(_word);
+            var words = _word.Length == 0
+                ? _prevWord != null ? _predictor.PredictNext(_prevWord) : []
+                : core.Length > 0 && trail.Length == 0 ? _predictor.Complete(core, _prevWord) : [];
+            foreach (var word in words.Where(w => !_corrections.Contains(w)))
+                AddChip(word, PredictionBrush, null, Prediction_Click);
         }
         SuggestionPopup.IsOpen = Suggestions.Children.Count > 0 && IsVisible && WindowState == WindowState.Normal;
+    }
+
+    private Button AddChip(string content, Brush background, string? toolTip, RoutedEventHandler click)
+    {
+        var button = new Button
+        {
+            Style = (Style)FindResource("KeyStyle"),
+            Content = content,
+            FontSize = 14,
+            Padding = new Thickness(12, 3, 12, 3),
+            Background = background,
+            ToolTip = toolTip,
+            Tag = content,
+        };
+        button.Click += click;
+        Suggestions.Children.Add(button);
+        return button;
     }
 
     private void RepositionSuggestions()
@@ -231,16 +383,116 @@ public partial class MainWindow : Window
     private void Suggestion_Click(object sender, RoutedEventArgs e)
     {
         var item = (VaultItem)((Button)sender).Tag;
-        for (int i = 0; i < _word.Length; i++)
-        {
-            SendKey(VK_BACK, 0, 0);
-            SendKey(VK_BACK, 0, KEYEVENTF_KEYUP);
-        }
-        TypeText(item.Value);
+        ReleaseHeld();
+        ReplaceTyped(_word.Length, item.Value);
+        ResetWord();
+    }
+
+    /// <summary>Completes the current word (or adds the predicted next word) followed by a space.</summary>
+    private void Prediction_Click(object sender, RoutedEventArgs e)
+    {
+        var word = (string)((Button)sender).Tag;
+        ReleaseHeld();
+        var (lead, core, _) = SplitWord(_word);
+        ReplaceTyped(core.Length, word + " ");
+        var prevBefore = _prevWord;
         _word = "";
-        WordText.Text = "On-Screen Keyboard";
-        WordText.Foreground = Frozen("#FFAAAAAA");
+        _corrections = [];
+        _undoOriginal = null;
+        Accept(lead, word, "", prevBefore, bySpace: true);
+        UpdateWordText();
         ShowSuggestions();
+    }
+
+    /// <summary>Swaps the misspelled word that was just typed for the chosen suggestion.</summary>
+    private void Correction_Click(object sender, RoutedEventArgs e)
+    {
+        if (_resume is not { } last) return;
+        var word = (string)((Button)sender).Tag;
+        ReleaseHeld();
+        ReplaceTyped(last.Raw.Length + 1, last.Lead + word + last.Trail + " ");
+        if (last.Learned) _predictor.Forget(last.Core);
+        _corrections = [];
+        Accept(last.Lead, word, last.Trail, last.PrevBefore, bySpace: true);
+        ShowSuggestions();
+    }
+
+    /// <summary>Restores the word the user typed before auto-correct changed it, and stops correcting it.</summary>
+    private void Undo_Click(object sender, RoutedEventArgs e)
+    {
+        if (_resume is not { } last || _undoOriginal is not { } original) return;
+        ReleaseHeld();
+        ReplaceTyped(last.Raw.Length + 1, last.Lead + original + last.Trail + " ");
+        if (last.Learned) _predictor.Forget(last.Core);
+        _undoOriginal = null;
+        Accept(last.Lead, original, last.Trail, last.PrevBefore, bySpace: true);
+        if (_resume?.Learned == true) _predictor.MarkKnown(original);
+        ShowSuggestions();
+    }
+
+    private void ClearLearned_Click(object sender, RoutedEventArgs e)
+    {
+        OptionsButton.IsChecked = false;
+        if (MessageBox.Show(this, "Forget all words learned from your typing?", "Clear learned words",
+                MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        _predictor.Clear();
+        _wordsWindow?.Refresh();
+        ResetWord();
+    }
+
+    private WordsWindow? _wordsWindow;
+
+    private void BrowseWords_Click(object sender, RoutedEventArgs e)
+    {
+        OptionsButton.IsChecked = false;
+        if (_wordsWindow != null)
+        {
+            _wordsWindow.Activate();
+            return;
+        }
+        _wordsWindow = new WordsWindow(_predictor) { Owner = this };
+        _wordsWindow.Closed += (_, _) => _wordsWindow = null;
+        _wordsWindow.Show();
+    }
+
+    // ---- Voice typing -----------------------------------------------------------
+
+    private Shortcut _voice = Shortcut.Parse(Shortcut.WindowsVoiceTyping)!;
+    private bool _voiceHeld;
+
+    private void UpdateVoiceLabels()
+    {
+        VoiceButton.ToolTip = $"Voice typing ({_voice}). Hold for push-to-talk apps.";
+        VoiceShortcutButton.Content = $"Shortcut: {_voice}  ·  Change…";
+    }
+
+    /// <summary>Presses the voice shortcut while the button is held, so both toggle and push-to-talk apps work.</summary>
+    private void Voice_Down(object sender, MouseButtonEventArgs e)
+    {
+        if (_voiceHeld) return;
+        OptionsButton.IsChecked = false;
+        ReleaseHeld();
+        ResetWord(); // Dictated text is not tracked.
+        _voiceHeld = true;
+        _voice.Press();
+        Refresh();
+    }
+
+    private void Voice_Up(object sender, EventArgs e)
+    {
+        if (!_voiceHeld) return;
+        _voiceHeld = false;
+        _voice.Release();
+    }
+
+    private void VoiceShortcut_Click(object sender, RoutedEventArgs e)
+    {
+        OptionsButton.IsChecked = false;
+        var dialog = new VoiceShortcutWindow(_voice) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.Result == null) return;
+        _voice = dialog.Result;
+        _settings.VoiceShortcut = _voice.ToString();
+        UpdateVoiceLabels();
     }
 
     private void RememberTarget()
@@ -270,13 +522,7 @@ public partial class MainWindow : Window
         _vaultPicker.Closed += (_, _) => _vaultPicker = null;
         _vaultPicker.EditRequested += item => OpenVault(null, item);
         _vaultPicker.BeforeInsert += ReleaseHeld;
-        _vaultPicker.Inserted += () =>
-        {
-            _word = "";
-            WordText.Text = "On-Screen Keyboard";
-            WordText.Foreground = Frozen("#FFAAAAAA");
-            ShowSuggestions();
-        };
+        _vaultPicker.Inserted += ResetWord;
         _vaultPicker.Show();
     }
 
@@ -422,6 +668,12 @@ public partial class MainWindow : Window
         NavToggle.IsChecked = _settings.ShowNavigationPanel;
         PinToggle.IsChecked = _settings.AlwaysOnTop;
         OpacitySlider.Value = Math.Clamp(_settings.Opacity, 0.3, 1);
+        PredictToggle.IsChecked = _settings.WordPredictions;
+        LearnToggle.IsChecked = _settings.LearnWords;
+        SpellToggle.IsChecked = _settings.SpellCheck;
+        AutoCorrectToggle.IsChecked = _settings.AutoCorrect;
+        _voice = Shortcut.Parse(_settings.VoiceShortcut) ?? _voice;
+        UpdateVoiceLabels();
         ApplyOptions();
     }
 
@@ -434,7 +686,9 @@ public partial class MainWindow : Window
             def.Height = panel.Visibility == Visibility.Visible ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         NavigationKeys.RowDefinitions[1].Height = _navRow.Visibility == Visibility.Visible ? new GridLength(3, GridUnitType.Star) : new GridLength(0);
         Topmost = PinToggle.IsChecked == true;
+        AutoCorrectToggle.IsEnabled = SpellToggle.IsChecked == true;
         UpdateFontSize();
+        ShowSuggestions();
     }
 
     private void KeyRows_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateFontSize();
@@ -515,8 +769,12 @@ public partial class MainWindow : Window
         SuggestionPopup.IsOpen = false;
         _poll.Stop();
         _repeat.Stop();
+        _saveTimer.Stop();
+        Voice_Up(this, EventArgs.Empty);
         ReleaseHeld();
+        _predictor.Save();
         _vaultPicker?.Close();
+        _wordsWindow?.Close();
         _vaultWindow?.Close();
 
         _settings.ShowNumberRow = NumToggle.IsChecked == true;
@@ -524,6 +782,10 @@ public partial class MainWindow : Window
         _settings.ShowNavigationPanel = NavToggle.IsChecked == true;
         _settings.AlwaysOnTop = PinToggle.IsChecked == true;
         _settings.Opacity = OpacitySlider.Value;
+        _settings.WordPredictions = PredictToggle.IsChecked == true;
+        _settings.LearnWords = LearnToggle.IsChecked == true;
+        _settings.SpellCheck = SpellToggle.IsChecked == true;
+        _settings.AutoCorrect = AutoCorrectToggle.IsChecked == true;
         _settings.Left = Left;
         _settings.Top = Top;
         _settings.Width = Width;
