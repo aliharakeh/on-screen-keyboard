@@ -62,20 +62,7 @@ public partial class MainWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        var source = (HwndSource)PresentationSource.FromVisual(this)!;
-        // Never take focus from the app the user is typing into.
-        SetWindowLongPtr(source.Handle, GWL_EXSTYLE, GetWindowLongPtr(source.Handle, GWL_EXSTYLE) | WS_EX_NOACTIVATE);
-        source.AddHook(WndProc);
-    }
-
-    private static nint WndProc(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
-    {
-        if (msg == WM_MOUSEACTIVATE)
-        {
-            handled = true;
-            return MA_NOACTIVATE;
-        }
-        return 0;
+        MakeNoActivate(this);
     }
 
     private static Brush Frozen(string hex)
@@ -136,9 +123,11 @@ public partial class MainWindow : Window
 
     // ---- Key handling -----------------------------------------------------------
 
-    private void Key_Down(object sender, MouseButtonEventArgs e)
+    private void Key_Down(object sender, MouseButtonEventArgs e) => PressKey((KeyDef)((Button)sender).Tag);
+
+    /// <summary>Presses a key as if its button was pressed; repeating keys keep repeating until <see cref="Key_Up"/>.</summary>
+    private void PressKey(KeyDef def)
     {
-        var def = (KeyDef)((Button)sender).Tag;
         if (def.IsModifier && def.Kind != KeyKind.Caps)
         {
             ToggleHeld(def);
@@ -464,10 +453,13 @@ public partial class MainWindow : Window
     {
         VoiceButton.ToolTip = $"Voice typing ({_voice}). Hold for push-to-talk apps.";
         VoiceShortcutButton.Content = $"Shortcut: {_voice}  ·  Change…";
+        _dock?.SetVoiceTooltip((string)VoiceButton.ToolTip);
     }
 
     /// <summary>Presses the voice shortcut while the button is held, so both toggle and push-to-talk apps work.</summary>
-    private void Voice_Down(object sender, MouseButtonEventArgs e)
+    private void Voice_Down(object sender, MouseButtonEventArgs e) => PressVoice();
+
+    private void PressVoice()
     {
         if (_voiceHeld) return;
         OptionsButton.IsChecked = false;
@@ -518,7 +510,14 @@ public partial class MainWindow : Window
             _vaultPicker.Activate();
             return;
         }
-        _vaultPicker = new VaultPickerWindow(_vault, _lastTarget) { Owner = this };
+        _vaultPicker = new VaultPickerWindow(_vault, _lastTarget) { Owner = (Window?)_dock ?? this };
+        if (_dock != null)
+        {
+            // The keyboard is minimized: centre the picker on the docked monitor instead of on the tiny toolbar.
+            _vaultPicker.WindowStartupLocation = WindowStartupLocation.Manual;
+            _vaultPicker.Left = _dockArea.Left + (_dockArea.Width - _vaultPicker.Width) / 2;
+            _vaultPicker.Top = _dockArea.Top + (_dockArea.Height - _vaultPicker.Height) / 2;
+        }
         _vaultPicker.Closed += (_, _) => _vaultPicker = null;
         _vaultPicker.EditRequested += item => OpenVault(null, item);
         _vaultPicker.BeforeInsert += ReleaseHeld;
@@ -614,6 +613,7 @@ public partial class MainWindow : Window
         bool shift = _held.Any(k => k.Kind == KeyKind.Shift);
         bool caps = (GetKeyState(VK_CAPITAL) & 1) != 0;
         LangButton.Content = _lang == Lang.Arabic ? "ع" : "EN";
+        _dock?.SetLanguage((string)LangButton.Content);
         SaveWordButton.IsEnabled = _word.Length > 0;
 
         foreach (var (def, button) in _keys)
@@ -672,6 +672,8 @@ public partial class MainWindow : Window
         LearnToggle.IsChecked = _settings.LearnWords;
         SpellToggle.IsChecked = _settings.SpellCheck;
         AutoCorrectToggle.IsChecked = _settings.AutoCorrect;
+        DockToggle.IsChecked = _settings.DockOnMinimize;
+        UpdateDockSideButtons();
         _voice = Shortcut.Parse(_settings.VoiceShortcut) ?? _voice;
         UpdateVoiceLabels();
         ApplyOptions();
@@ -687,6 +689,7 @@ public partial class MainWindow : Window
         NavigationKeys.RowDefinitions[1].Height = _navRow.Visibility == Visibility.Visible ? new GridLength(3, GridUnitType.Star) : new GridLength(0);
         Topmost = PinToggle.IsChecked == true;
         AutoCorrectToggle.IsEnabled = SpellToggle.IsChecked == true;
+        DockSidePanel.Visibility = DockToggle.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         UpdateFontSize();
         ShowSuggestions();
     }
@@ -712,7 +715,76 @@ public partial class MainWindow : Window
     }
 
     private void Minimize_Click(object sender, RoutedEventArgs e) =>
-        AnimateOut(() => WindowState = WindowState.Minimized);
+        AnimateOut(DockToggle.IsChecked == true ? Dock : () => WindowState = WindowState.Minimized);
+
+    // ---- Docked compact mode ----------------------------------------------------
+
+    private DockWindow? _dock;
+    private Rect _dockArea;
+
+    private void DockSide_Click(object sender, RoutedEventArgs e)
+    {
+        var side = (DockSide)((FrameworkElement)sender).Tag;
+        // Picking a side starts the toolbar centred on it.
+        if (side != _settings.DockSide) _settings.DockOffsets.Remove(side);
+        _settings.DockSide = side;
+        UpdateDockSideButtons();
+    }
+
+    private void UpdateDockSideButtons()
+    {
+        foreach (ToggleButton button in DockSidePanel.Children)
+            button.IsChecked = (DockSide)button.Tag == _settings.DockSide;
+    }
+
+    /// <summary>Minimizes the keyboard and shows the compact toolbar on the chosen edge of its current monitor.</summary>
+    private void Dock()
+    {
+        var source = PresentationSource.FromVisual(this);
+        if (source?.CompositionTarget == null)
+        {
+            WindowState = WindowState.Minimized;
+            return;
+        }
+        var area = MonitorWorkArea(new WindowInteropHelper(this).Handle);
+        area.Transform(source.CompositionTarget.TransformFromDevice);
+        _dockArea = area;
+        OptionsButton.IsChecked = false;
+        ReleaseHeld();
+        WindowState = WindowState.Minimized;
+
+        var side = _settings.DockSide;
+        var dock = new DockWindow(side, area, _settings.DockOffsets.GetValueOrDefault(side, 0.5))
+        {
+            Topmost = PinToggle.IsChecked == true,
+            Opacity = OpacitySlider.Value,
+        };
+        dock.SetLanguage((string)LangButton.Content);
+        dock.SetVoiceTooltip((string)VoiceButton.ToolTip);
+        dock.RestoreRequested += () => WindowState = WindowState.Normal;
+        dock.VoicePressed += PressVoice;
+        dock.VoiceReleased += () => Voice_Up(dock, EventArgs.Empty);
+        dock.LanguageRequested += () => Lang_Click(dock, new RoutedEventArgs());
+        dock.VaultRequested += () => Vault_Click(dock, new RoutedEventArgs());
+        var backspace = _keys.First(k => k.Def.Scan == 14).Def;
+        dock.BackspacePressed += () => PressKey(backspace);
+        dock.BackspaceReleased += () => Key_Up(dock, EventArgs.Empty);
+        dock.OffsetChanged += offset => _settings.DockOffsets[side] = offset;
+        dock.Closed += (_, _) => { if (_dock == dock) _dock = null; };
+        _dock = dock;
+        dock.Show();
+    }
+
+    private void Undock()
+    {
+        if (_dock is not { } dock) return;
+        _dock = null;
+        Voice_Up(this, EventArgs.Empty);
+        Key_Up(this, EventArgs.Empty);
+        // Keep an open vault picker alive: closing the toolbar would close the windows it owns.
+        if (_vaultPicker != null && _vaultPicker.Owner == dock) _vaultPicker.Owner = this;
+        dock.Close();
+    }
 
     private void Close_Click(object sender, RoutedEventArgs e) => AnimateOut(Close);
 
@@ -760,13 +832,18 @@ public partial class MainWindow : Window
     protected override void OnStateChanged(EventArgs e)
     {
         base.OnStateChanged(e);
-        if (WindowState == WindowState.Normal) AnimateIn();
+        if (WindowState == WindowState.Normal)
+        {
+            Undock(); // Restored from the toolbar or from the taskbar button.
+            AnimateIn();
+        }
         else SuggestionPopup.IsOpen = false;
     }
 
     protected override void OnClosed(EventArgs e)
     {
         SuggestionPopup.IsOpen = false;
+        Undock();
         _poll.Stop();
         _repeat.Stop();
         _saveTimer.Stop();
@@ -786,6 +863,7 @@ public partial class MainWindow : Window
         _settings.LearnWords = LearnToggle.IsChecked == true;
         _settings.SpellCheck = SpellToggle.IsChecked == true;
         _settings.AutoCorrect = AutoCorrectToggle.IsChecked == true;
+        _settings.DockOnMinimize = DockToggle.IsChecked == true;
         _settings.Left = Left;
         _settings.Top = Top;
         _settings.Width = Width;

@@ -1,0 +1,35 @@
+<Window x:Class="OnScreenKeyboard.DockWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="On-Screen Keyboard (docked)" Icon="app.ico"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize" ShowInTaskbar="False" ShowActivated="False" FlowDirection="LeftToRight">
+    <Window.Resources>
+        <Style x:Key="DockButton" TargetType="Button" BasedOn="{StaticResource KeyStyle}">
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="FontSize" Value="15"/>
+        </Style>
+    </Window.Resources>
+    <Border x:Name="Frame" Background="#FF2B2B2B" BorderBrush="#FF555555" Padding="3">
+        <StackPanel x:Name="Bar">
+            <Border x:Name="Grip" Width="40" Height="34" Background="Transparent" Cursor="SizeAll"
+                    ToolTip="Drag to move along the edge"
+                    MouseLeftButtonDown="Grip_Down" MouseMove="Grip_Move" MouseLeftButtonUp="Grip_Up" LostMouseCapture="Grip_Lost">
+                <TextBlock x:Name="GripText" Text="⋮⋮" Foreground="#FF888888" FontSize="14"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <Button Content="⌨" Style="{StaticResource DockButton}" FontSize="20" ToolTip="Show the keyboard"
+                    AutomationProperties.Name="Show the keyboard" Click="Restore_Click"/>
+            <Button x:Name="VoiceButton" Content="🎤" Style="{StaticResource DockButton}" AutomationProperties.Name="Voice typing"
+                    PreviewMouseLeftButtonDown="Voice_Down" PreviewMouseLeftButtonUp="Voice_Up" LostMouseCapture="Voice_Up"/>
+            <Button x:Name="LangButton" Style="{StaticResource DockButton}" FontSize="14"
+                    ToolTip="Switch input language (Win+Space)" AutomationProperties.Name="Switch input language" Click="Lang_Click"/>
+            <Button Content="Vault" Style="{StaticResource DockButton}" FontSize="12" ToolTip="Open the vault"
+                    AutomationProperties.Name="Open vault" Click="Vault_Click"/>
+            <Button Content="⌫" Style="{StaticResource DockButton}" FontSize="18" ToolTip="Backspace (hold to repeat)"
+                    AutomationProperties.Name="Backspace"
+                    PreviewMouseLeftButtonDown="Backspace_Down" PreviewMouseLeftButtonUp="Backspace_Up" LostMouseCapture="Backspace_Up"/>
+        </StackPanel>
+    </Border>
+</Window>

@@ -66,6 +66,49 @@ internal static class NativeMethods
     [DllImport("user32.dll")] public static extern bool IsWindow(nint hwnd);
     [DllImport("user32.dll")] public static extern bool IsIconic(nint hwnd);
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(nint hwnd, int command);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor, rcWork;
+        public uint dwFlags;
+    }
+
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
+    [DllImport("user32.dll")] private static extern nint MonitorFromWindow(nint hwnd, uint flags);
+    [DllImport("user32.dll")] private static extern bool GetMonitorInfo(nint monitor, ref MONITORINFO info);
+
+    /// <summary>Work area (screen minus taskbar), in device pixels, of the monitor showing <paramref name="hwnd"/>.</summary>
+    public static System.Windows.Rect MonitorWorkArea(nint hwnd)
+    {
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), ref info))
+            return System.Windows.SystemParameters.WorkArea;
+        var r = info.rcWork;
+        return new System.Windows.Rect(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
+    }
+
+    /// <summary>Keeps a window from ever taking focus from the app the user is typing into.</summary>
+    public static void MakeNoActivate(System.Windows.Window window)
+    {
+        var source = (System.Windows.Interop.HwndSource)System.Windows.PresentationSource.FromVisual(window)!;
+        SetWindowLongPtr(source.Handle, GWL_EXSTYLE, GetWindowLongPtr(source.Handle, GWL_EXSTYLE) | WS_EX_NOACTIVATE);
+        source.AddHook(NoActivateHook);
+    }
+
+    private static nint NoActivateHook(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
+    {
+        if (msg == WM_MOUSEACTIVATE)
+        {
+            handled = true;
+            return MA_NOACTIVATE;
+        }
+        return 0;
+    }
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(nint hwnd, StringBuilder text, int count);
 
